@@ -1,0 +1,111 @@
+- name: wait for ssh connection
+  hosts: all
+  gather_facts: False
+  tasks: 
+    - name: ensure ssh port open
+      wait_for:
+        port: 22
+        delay: 10
+        timeout: 100
+        search_regex: OpenSSH
+        host: '{{ (ansible_ssh_host|default(ansible_host))|default(inventory_hostname) }}'
+      vars:
+        ansible_connection: local
+
+- name: Install Python 3, Docker & Docker Compose
+  hosts: all
+  become: true
+  vars:
+    - ansible_interpreter_python: /usr/bin/python
+  tasks:
+    - name: Install Python 3, pip, and Docker
+      yum:
+        name: 
+          - python3
+          - python3-pip
+          - docker
+        update_cache: yes
+        state: present
+
+    - name: Install Docker Compose
+      get_url:
+        url: "https://github.com/docker/compose/releases/latest/download/docker-compose-Linux-{{ ansible_architecture }}"
+        dest: /usr/local/bin/docker-compose
+        mode: '0755'  # Correct mode for executable files
+
+- name: Start Docker
+  hosts: all
+  become: yes
+  tasks:
+    - name: Start Docker daemon
+      systemd:
+        name: docker
+        state: started
+        enabled: true  # Ensure Docker starts on boot
+
+- name: create new user
+  hosts: all
+  become: true
+  tasks:
+    - name: create user to docker group
+      user:
+        name: idriss
+        groups: docker, adm
+        append: yes
+
+    - name: Reconnect to server session
+      meta: reset_connection
+
+- name: Test Docker
+  hosts: all
+  become: yes
+  become_user: idriss
+  tasks: 
+    - name: Install Docker Python module
+      pip:
+        name: 
+          - docker
+          - docker-compose  # Fixed syntax here
+
+    - name: Pull Redis image
+      docker_image:  # pull docker image
+        name: redis
+        source: pull
+
+- name: Start Docker containers
+  hosts: all
+  become: yes
+  become_user: idriss
+  vars_files:
+    - project-vars.yaml
+  tasks:
+    - name: Copy Docker Compose file
+      copy:
+        src: /home/vboxuser/Downloads/Docker_TP/Docker-compose.yaml
+        dest: /home/idriss/docker-compose.yaml
+      
+
+
+    - name: Docker login
+      docker_login:
+          registry_url: https://index.docker.io/v1
+          username: idriss5234
+          password: "{{ docker_password }}"
+
+   # - name: Start container from Docker Compose
+    #  docker_compose:
+     #   project_src: /home/ec2-user
+
+- name: Run Nginx container
+  hosts: all
+  become: yes
+  become_user: idriss
+  tasks:
+    - name: Start Nginx container
+      docker_container:
+        name: nginx_container  
+        image: nginx           
+        state: started
+        detach: true
+        published_ports:       
+          - "8080:80"
